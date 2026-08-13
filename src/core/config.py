@@ -49,7 +49,15 @@ _load_dotenv(ROOT / ".env")
 
 
 def _str(name: str, default: str = "") -> str:
-    return os.environ.get(name, default).strip()
+    """Read a variable, treating a blank value as absent.
+
+    ``os.environ.get(name, default)`` returns "" for a variable that is set but
+    empty, and .env.example ships several as blank to mark them optional. So a
+    filled-in .env containing ``DATABASE_URL=`` would defeat its own default and
+    leave the app with no DSN at all -- failing at connect time rather than
+    falling back to SQLite.
+    """
+    return (os.environ.get(name) or default).strip()
 
 
 def _int(name: str, default: int = 0) -> int:

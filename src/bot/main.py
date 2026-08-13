@@ -12,6 +12,7 @@ stops the bot instead of only breaking the web UI.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import sys
 
@@ -21,6 +22,7 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
+    CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -32,6 +34,7 @@ from src.bot.handlers_auth import GsKeySG, KeyGate, begin_login
 from src.core import config, licenses
 from src.db import models as db
 from src.mtproto.sessions import MAIN, WRITER, SessionStore
+from src.tools.tracker.service import TrackerService
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +99,14 @@ async def cmd_start(message: Message, state: FSMContext, **kw) -> None:
         )
         return
 
+    # Mini-app opens this deep link when an auto-message rule needs a separate
+    # sender account. Keep the login in chat, where Telegram can safely collect
+    # the phone/code/password flow.
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) == 2 and parts[1].strip().casefold() == "writer":
+        await begin_login(message, state, WRITER, message.from_user.id)
+        return
+
     if await store.get(message.from_user.id, MAIN) is None:
         await message.answer(
             "🥖 <b>С возвращением</b>\n\n"
@@ -115,19 +126,25 @@ async def cmd_start(message: Message, state: FSMContext, **kw) -> None:
         return
 
     await message.answer(
-        "🥖 <b>Ciabatta Tools</b>\n\nВсё готово. Открывай приложение.",
+        "🥖 <b>Ciabatta Tools</b>\n\n"
+        "Всё готово. Открывай приложение.\n\n"
+        "⚠️ Перед запуском авто-ордеринга убедись, что на MRKT хватает "
+        "баланса TON на заявку и комиссию.",
         reply_markup=kb,
     )
 
 
 @router.callback_query(F.data == "login:main")
-async def cb_login_main(callback, state: FSMContext) -> None:
+async def cb_login_main(callback: CallbackQuery, state: FSMContext) -> None:
+    # callback.from_user is the person who tapped; callback.message.from_user is
+    # the bot that sent the keyboard. Passing the wrong one files the login under
+    # the bot's id and the user's next message cannot find it.
     await callback.answer()
-    await begin_login(callback.message, state, MAIN)
+    await begin_login(callback.message, state, MAIN, callback.from_user.id)
 
 
 @router.callback_query(F.data == "login:writer")
-async def cb_login_writer(callback, state: FSMContext) -> None:
+async def cb_login_writer(callback: CallbackQuery, state: FSMContext) -> None:
     """Connect the second account used for auto-messages.
 
     Separate from the main login because the risk differs: unsolicited DMs are
@@ -135,7 +152,7 @@ async def cb_login_writer(callback, state: FSMContext) -> None:
     account holding the gifts is not the one taking that risk.
     """
     await callback.answer()
-    await begin_login(callback.message, state, WRITER)
+    await begin_login(callback.message, state, WRITER, callback.from_user.id)
 
 
 @router.message(Command("gskey"))
@@ -200,9 +217,10 @@ async def _startup() -> tuple[Bot, Dispatcher, SessionStore]:
 
     await db.init_models()
 
-    # Idempotent: mints only what is absent, so a restart never issues a second
-    # copy of a key someone already bought.
-    added = await db.seed_licences(licenses.generate_keys())
+    # Derived from SECRET_KEY, not randomly generated: the same secret always
+    # yields the same 100 keys, so a restart does not mint a second batch and a
+    # rebuilt database restores the keys already sold.
+    added = await db.seed_licences(licenses.derive_keys(config.SECRET_KEY))
     log.info("licences ready (%d new)", added)
 
     store = SessionStore(
@@ -235,7 +253,9 @@ async def main() -> None:
     # Telethon logs every MTProto call at INFO, which buries our own lines.
     logging.getLogger("telethon").setLevel(logging.WARNING)
 
-    bot, dp, _ = await _startup()
+    bot, dp, store = await _startup()
+    tracker = TrackerService(bot, store)
+    tracker_task = asyncio.create_task(tracker.run(), name="gift-tracker")
 
     if config.DRY_RUN:
         log.warning("DRY_RUN is on -- no real purchases will be made")
@@ -246,6 +266,10 @@ async def main() -> None:
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
     finally:
+        await tracker.stop()
+        tracker_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await tracker_task
         await bot.session.close()
 
 

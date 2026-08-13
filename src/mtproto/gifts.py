@@ -16,8 +16,9 @@ you how many are new and only the gap needs fetching.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 from src.core import config
 
@@ -275,7 +276,10 @@ def slug_for(base_name: str, number: int) -> str:
     spaces removed -- verified against a working implementation rather than
     guessed. ``t.me/nft/<slug>`` resolves to a real preview card.
     """
-    compact = "".join((base_name or "").split())
+    # Telegram slugs keep only ASCII letters and digits. Catalogue titles contain
+    # punctuation such as B-Day, Jack-in-the-Box and Durov’s Cap; preserving that
+    # punctuation produces a valid-looking URL that always returns not found.
+    compact = re.sub(r"[^A-Za-z0-9]", "", base_name or "")
     return config.GIFT_SLUG_TPL.format(base_name=compact, number=number)
 
 
@@ -311,6 +315,54 @@ class GiftReader:
         for chat in getattr(result, "chats", None) or []:
             users[chat.id] = chat
         return parse_unique_gift(result.gift, users=users)
+
+    async def watermarks(self, entries: Iterable[tuple[str, str]]) -> dict[str, int]:
+        """Read many collection counters in one MTProto container.
+
+        Telethon batches a request list into one encrypted message. Individual
+        invalid slugs are preserved in ``MultiError.results`` rather than
+        discarding successful neighbours, so startup can prime the complete
+        catalogue without one network round trip per collection.
+        """
+        from telethon.errors import MultiError
+        from telethon.tl.functions.payments import GetUniqueStarGiftRequest
+
+        rows = [(base_name, probe_slug) for base_name, probe_slug in entries]
+        if not rows:
+            return {}
+        requests = [GetUniqueStarGiftRequest(slug=slug) for _, slug in rows]
+        try:
+            results = await self.client(requests)
+        except MultiError as exc:
+            results = exc.results
+
+        found: dict[str, int] = {}
+        for (base_name, _), result in zip(rows, results):
+            if result is None:
+                continue
+            gift = getattr(result, "gift", None)
+            issued = getattr(gift, "availability_issued", None)
+            if issued is not None:
+                found[base_name] = int(issued)
+        return found
+
+    async def upgradeable_collections(self) -> list[tuple[str, str]]:
+        """Return every upgradeable base gift as ``(title, probe_slug)``.
+
+        This catalogue comes from Telegram rather than MRKT. The tracker watches
+        upgrades, so using market collections as its source silently omits gifts
+        that have no current MRKT listing and cannot implement "select all".
+        """
+        from telethon.tl.functions.payments import GetStarGiftsRequest
+
+        result = await self.client(GetStarGiftsRequest(hash=0))
+        rows: list[tuple[str, str]] = []
+        for gift in getattr(result, "gifts", None) or []:
+            title = getattr(gift, "title", None)
+            if not title or getattr(gift, "upgrade_stars", None) is None:
+                continue
+            rows.append((title, slug_for(title, 1)))
+        return rows
 
     async def watermark(self, slug: str) -> int | None:
         """Current mint high-water mark for this gift's collection.

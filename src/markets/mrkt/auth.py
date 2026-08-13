@@ -95,7 +95,9 @@ class MrktAuth:
             if force_refresh and self._static:
                 raise AuthError(
                     "MRKT_TOKEN from the environment expired. Paste a fresh one, "
-                    "or connect a Telegram session for automatic refresh."
+                    "or connect a Telegram session for automatic refresh. "
+                    "Also make sure the MRKT account has enough TON balance "
+                    "for the operation and fee."
                 )
             self._token = await self._login()
             return self._token
@@ -108,7 +110,8 @@ class MrktAuth:
         if self._init_data_source is None:
             raise AuthError(
                 "no Telegram session and no MRKT_TOKEN: cannot authenticate. "
-                "Log in through the bot first."
+                "Log in through the bot first and make sure the MRKT account "
+                "has enough TON balance for the operation and fee."
             )
         init_data = await self._init_data_source()
         response = await self._session.post(

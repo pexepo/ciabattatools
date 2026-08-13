@@ -27,6 +27,7 @@ from src.core.money import Nano
 from src.mtproto.gifts import GiftReader, UniqueGift, slug_for
 
 log = logging.getLogger(__name__)
+_NO_WATERMARK = object()
 
 # Every state a gift can be seen in. Filters default to all three: a tracker that
 # silently hid burns would defeat its own purpose.
@@ -47,6 +48,11 @@ class Filters:
     """
 
     collections: set[str] = field(default_factory=set)
+    # Explicit marker from the collection picker's "select all" action. The
+    # market catalogue can lag Telegram's upgradeable-gift catalogue, so a list
+    # containing every currently visible market collection is not necessarily
+    # identical to Telegram's list.
+    collections_all: bool = False
     models: set[str] = field(default_factory=set)
     backdrops: set[str] = field(default_factory=set)
     states: set[str] = field(default_factory=lambda: set(ALL_STATES))
@@ -55,6 +61,10 @@ class Filters:
     owner_gifts_min: int | None = None
     owner_gifts_max: int | None = None
     reputation_min: int | None = None
+    reputation_max: int | None = None
+    # Notifications without a working owner chat are not actionable. Tracking
+    # is intentionally limited to Telegram owners the user can contact.
+    reachable_owner_only: bool = True
     # When a price bound is set but no floor is known, drop the gift rather than
     # letting it through: a price filter that ignores unpriced gifts is not a
     # price filter.
@@ -67,6 +77,7 @@ class Filters:
     def normalized(self) -> "Filters":
         return Filters(
             collections=self._fold_all(self.collections),
+            collections_all=self.collections_all,
             models=self._fold_all(self.models),
             backdrops=self._fold_all(self.backdrops),
             states=set(self.states or ALL_STATES),
@@ -75,6 +86,8 @@ class Filters:
             owner_gifts_min=self.owner_gifts_min,
             owner_gifts_max=self.owner_gifts_max,
             reputation_min=self.reputation_min,
+            reputation_max=self.reputation_max,
+            reachable_owner_only=self.reachable_owner_only,
             require_price_when_bounded=self.require_price_when_bounded,
         )
 
@@ -90,7 +103,7 @@ def matches(gift: UniqueGift, filters: Filters, *, price: Nano | None = None) ->
 
     if gift.state not in f.states:
         return False
-    if f.collections and _fold(gift.collection) not in f.collections:
+    if f.collections and not f.collections_all and _fold(gift.collection) not in f.collections:
         return False
     if f.models and _fold(gift.model.name if gift.model else None) not in f.models:
         return False
@@ -98,6 +111,9 @@ def matches(gift: UniqueGift, filters: Filters, *, price: Nano | None = None) ->
         name = _fold(gift.backdrop.name if gift.backdrop else None)
         if name not in f.backdrops:
             return False
+
+    if f.reachable_owner_only and not gift.owner.is_reachable:
+        return False
 
     if f.price_from is not None or f.price_to is not None:
         if price is None:
@@ -118,6 +134,10 @@ def matches(gift: UniqueGift, filters: Filters, *, price: Nano | None = None) ->
         # Unknown reputation fails a reputation floor: avoiding unrated accounts
         # is precisely what the filter is for.
         if level is None or level < f.reputation_min:
+            return False
+    if f.reputation_max is not None:
+        level = gift.owner.reputation_level
+        if level is None or level > f.reputation_max:
             return False
 
     return True
@@ -179,6 +199,24 @@ class Watcher:
         # Dedupe within the process even without a database.
         self._local_seen: set[str] = set()
 
+    def replace_collections(self, collections: Iterable[tuple[str, str]]) -> None:
+        """Synchronise the watched catalogue without resetting known counters."""
+        wanted: dict[str, tuple[str, str]] = {}
+        for base_name, probe_slug in collections:
+            if base_name and probe_slug:
+                wanted[_fold(base_name)] = (base_name, probe_slug)
+
+        for key in tuple(self.collections):
+            if key not in wanted:
+                self.collections.pop(key)
+        for key, (base_name, probe_slug) in wanted.items():
+            current = self.collections.get(key)
+            if current is None:
+                self.collections[key] = Collection(base_name, probe_slug)
+            else:
+                current.base_name = base_name
+                current.probe_slug = probe_slug
+
     def track(self, base_name: str, probe_slug: str) -> None:
         key = _fold(base_name)
         if key not in self.collections:
@@ -214,12 +252,61 @@ class Watcher:
                 entry.last_issued = issued
                 log.info("primed %s at #%s", entry.base_name, issued)
 
+    async def prime_missing(self) -> None:
+        """Prime only collections added after the watcher started."""
+        missing = [
+            entry for entry in self.collections.values() if entry.last_issued is None
+        ]
+        batch_reader = getattr(self.reader, "watermarks", None)
+        if missing and callable(batch_reader):
+            try:
+                watermarks = await batch_reader(
+                    (entry.base_name, entry.probe_slug) for entry in missing
+                )
+            except Exception as exc:  # noqa: BLE001 - fall back to isolated reads
+                log.warning("could not batch-prime collections: %s", exc)
+            else:
+                for entry in missing:
+                    issued = watermarks.get(entry.base_name)
+                    if issued is not None:
+                        entry.last_issued = issued
+                        log.info("primed %s at #%s", entry.base_name, issued)
+                missing = [entry for entry in missing if entry.last_issued is None]
+
+        for entry in missing:
+            if entry.last_issued is not None:
+                continue
+            try:
+                issued = await self.reader.watermark(entry.probe_slug)
+            except Exception as exc:  # noqa: BLE001 - one collection is isolated
+                log.warning("could not prime %s: %s", entry.base_name, exc)
+                continue
+            if issued is not None:
+                entry.last_issued = issued
+                log.info("primed %s at #%s", entry.base_name, issued)
+
     async def poll_once(self) -> list[Found]:
         """One pass over every tracked collection."""
         found: list[Found] = []
-        for entry in self.collections.values():
+        entries = list(self.collections.values())
+        watermarks: dict[str, int] | None = None
+        batch_reader = getattr(self.reader, "watermarks", None)
+        if entries and callable(batch_reader):
             try:
-                found.extend(await self._poll_collection(entry))
+                watermarks = await batch_reader(
+                    (entry.base_name, entry.probe_slug) for entry in entries
+                )
+            except Exception as exc:  # noqa: BLE001 - sequential fallback below
+                log.warning("could not batch-read collection counters: %s", exc)
+
+        for entry in entries:
+            try:
+                issued = (
+                    watermarks.get(entry.base_name)
+                    if watermarks is not None
+                    else _NO_WATERMARK
+                )
+                found.extend(await self._poll_collection(entry, issued=issued))
             except Exception as exc:  # noqa: BLE001 - one bad collection must not
                 # stop the others; this loop is the product's heartbeat.
                 entry.misses += 1
@@ -229,8 +316,11 @@ class Watcher:
                 )
         return found
 
-    async def _poll_collection(self, entry: Collection) -> list[Found]:
-        issued = await self.reader.watermark(entry.probe_slug)
+    async def _poll_collection(
+        self, entry: Collection, *, issued: int | None | object = _NO_WATERMARK
+    ) -> list[Found]:
+        if issued is _NO_WATERMARK:
+            issued = await self.reader.watermark(entry.probe_slug)
         if issued is None:
             entry.misses += 1
             return []

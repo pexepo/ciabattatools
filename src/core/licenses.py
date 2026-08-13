@@ -71,6 +71,11 @@ def generate_keys(count: int = TOTAL_KEYS, *, include_owner: bool = True) -> lis
 
     ``secrets`` rather than ``random``: these are bearer credentials, and a
     predictable sequence would let one buyer derive the other 99.
+
+    Non-deterministic by design, so each call returns a different set. That makes
+    it the wrong function for seeding a database that already holds sold keys --
+    use :func:`derive_keys` for that. This one is for minting a fresh batch and
+    recording the result somewhere.
     """
     keys: list[str] = [OWNER_KEY] if include_owner else []
     seen = set(keys)
@@ -79,6 +84,48 @@ def generate_keys(count: int = TOTAL_KEYS, *, include_owner: bool = True) -> lis
         body = "".join(secrets.choice(ALPHABET) for _ in range(GROUPS * GROUP_LEN))
         chunks = [body[i : i + GROUP_LEN] for i in range(0, len(body), GROUP_LEN)]
         key = "-".join([PREFIX, *chunks])
+        if key in seen:
+            continue
+        seen.add(key)
+        keys.append(key)
+    return keys
+
+
+def derive_keys(
+    secret: str, count: int = TOTAL_KEYS, *, include_owner: bool = True
+) -> list[str]:
+    """Derive the same key set every time, from a secret.
+
+    This is what the bot seeds with. ``generate_keys`` produces a fresh random set
+    on every call, so seeding with it meant a restart minted 100 *new* keys and
+    left the old ones in the table: a key sold yesterday still validated, but the
+    total grew by 100 each boot, and a wiped database invalidated every key ever
+    sold. Deriving from ``CIABATTA_SECRET_KEY`` fixes both -- the same secret
+    always yields the same 100 keys, and rebuilding the database restores them.
+
+    Unpredictable without the secret: each key is HMAC-SHA256 over the secret and
+    an index, so knowing 99 keys does not reveal the hundredth. The secret must
+    therefore be treated as the master credential it is -- rotating it silently
+    invalidates every key in circulation.
+    """
+    if not secret:
+        raise ValueError("cannot derive licence keys without a secret")
+
+    keys: list[str] = [OWNER_KEY] if include_owner else []
+    seen = set(keys)
+    index = 0
+    while len(keys) < count + (1 if include_owner else 0):
+        digest = hmac.new(
+            secret.encode("utf-8"), f"licence:{index}".encode(), hashlib.sha256
+        ).digest()
+        # Rejection-free mapping: each byte is reduced modulo the alphabet, which
+        # skews the distribution by under 1% for a 30-character alphabet -- far
+        # too little to help an attacker who does not have the secret.
+        body = "".join(ALPHABET[b % len(ALPHABET)] for b in digest[: GROUPS * GROUP_LEN])
+        chunks = [body[i : i + GROUP_LEN] for i in range(0, len(body), GROUP_LEN)]
+        key = "-".join([PREFIX, *chunks])
+        index += 1
+        # A collision would silently shorten the set below 100.
         if key in seen:
             continue
         seen.add(key)

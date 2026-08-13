@@ -106,41 +106,30 @@ async function request(path, { method = 'GET', body, query, signal } = {}) {
 export const api = {
   me: () => request('/api/me'),
 
+  // Returns {ok, message} rather than throwing on a wrong key: a rejected key is
+  // an expected answer to be shown in place, not an error condition.
+  claimLicence: (key) => request('/api/licence', { method: 'POST', body: { key } }),
+
   collections: () => request('/api/collections'),
 
-  catalog: ({
-    collection,
-    model,
-    backdrop,
-    minPriceTon,
-    maxPriceTon,
-    cheapestFirst = true,
-    count = 30,
-    cursor = '',
-    signal,
-  } = {}) =>
-    request('/api/catalog', {
-      signal,
-      query: {
-        collection,
-        model,
-        backdrop,
-        min_price_ton: minPriceTon,
-        max_price_ton: maxPriceTon,
-        cheapest_first: String(cheapestFirst),
-        count,
-        cursor,
-      },
-    }),
+  // Model/backdrop/symbol facets for the tool-config pickers. MRKT has no
+  // attribute endpoint, so the server samples listings; scoping to a collection
+  // makes the sample relevant instead of a mix from the whole market. Each facet
+  // carries a preview (thumb, floor, rarity) for the Gift-Satellite-style cards.
+  facets: ({ collection, signal } = {}) =>
+    request('/api/facets', { signal, query: { collection } }),
 
   floor: ({ collection, model, backdrop, signal } = {}) =>
     request('/api/floor', { signal, query: { collection, model, backdrop } }),
 
+  floorSummary: ({ collection, model, backdrop, signal } = {}) =>
+    request('/api/floors/summary', { signal, query: { collection, model, backdrop } }),
+
   // Only the top order exists: MRKT publishes no order book, so this returns the
   // one figure needed to outbid, plus a `source` saying how it was obtained. A
   // caller about to spend on it must check `trustworthy` first.
-  topOrder: ({ collection, model, signal } = {}) =>
-    request('/api/orders/top', { signal, query: { collection, model } }),
+  topOrder: ({ collection, model, backdrop, signal } = {}) =>
+    request('/api/orders/top', { signal, query: { collection, model, backdrop } }),
 
   ciabattas: () => request('/api/ciabattas'),
 

@@ -160,7 +160,7 @@ def render_order_catch(
         f"{ICON['order']} <b>Ордер сработал</b>",
         "",
         f'<a href="{html.escape(telegram_url, quote=True)}">{title}</a>',
-        _line("Куплено за", ton(price)),
+        _line("Хрумкнуто за", ton(price)),
         "",
         *_attributes_block(model, backdrop, symbol),
         "",
@@ -184,9 +184,9 @@ def render_snipe(
     telegram_url: str,
     dry_run: bool = False,
 ) -> str:
-    """Tool 3, three forms, wording exactly as specified.
+    """Tool 3, three forms.
 
-    ``bought``  -> "Вы успешно купили X за Y"
+    ``bought``  -> "Вы хрумкнули X за Y"      (the loaf metaphor: a buy is a bite)
     ``found``   -> "Найден X за Y"            (no auto-buy, notify only)
     ``offered`` -> "Вы предложили X за Y"
 
@@ -200,7 +200,7 @@ def render_snipe(
     amount = ton(price)
 
     if kind == "bought":
-        head = f"{ICON['bought']} Вы успешно купили {linked} за <b>{amount}</b>"
+        head = f"{ICON['bought']} Вы хрумкнули {linked} за <b>{amount}</b>"
     elif kind == "offered":
         head = f"{ICON['offered']} Вы предложили {linked} за <b>{amount}</b>"
     elif kind == "found":

@@ -532,6 +532,28 @@ async def ensure_user(tg_id: int, username: str | None = None) -> User:
         return user
 
 
+async def get_user(tg_id: int) -> User | None:
+    """Fetch a user without creating one.
+
+    Distinct from ``ensure_user``: read paths must not have the side effect of
+    registering a user, or a probe against the API would populate the table.
+    """
+    async with session_scope() as db:
+        return await db.get(User, tg_id)
+
+
+async def set_dry_run(tg_id: int, dry_run: bool) -> None:
+    """Arm or disarm real spending for one user.
+
+    Logged at info deliberately: turning this off is what lets the tools spend
+    money, and anyone reconstructing "when did it start buying" needs the moment
+    recorded.
+    """
+    async with session_scope() as db:
+        await db.execute(update(User).where(User.tg_id == tg_id).values(dry_run=dry_run))
+    log.info("dry_run=%s for tg_id=%s", dry_run, tg_id)
+
+
 # --- licences ----------------------------------------------------------------
 
 
@@ -642,3 +664,18 @@ async def get_secret(tg_id: int, name: str) -> str | None:
         # again is the only way forward.
         log.error("could not decrypt secret %r for tg_id=%s", name, tg_id)
         return None
+
+
+async def drop_secret(tg_id: int, name: str) -> None:
+    """Forget a stored credential.
+
+    Deletes rather than blanks the row: a user revoking a leaked API key expects
+    it gone, and an empty ciphertext would still read as "a secret exists" to
+    every caller that checks for presence.
+    """
+    async with session_scope() as db:
+        row = await db.scalar(
+            select(Secret).where(Secret.tg_id == tg_id, Secret.name == name)
+        )
+        if row is not None:
+            await db.delete(row)

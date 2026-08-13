@@ -51,7 +51,11 @@ SEARCH_DEFAULTS: dict[str, Any] = {
     "modelNames": [],
     "backdropNames": [],
     "symbolNames": [],
-    "ordering": None,
+    # "Price", never None. MRKT rejects a null outright:
+    #   Cannot convert null value to GiftsService+GiftOrdering
+    # It is a non-nullable enum server-side, so every request has to name an
+    # ordering even when the caller has no preference.
+    "ordering": "Price",
     "lowToHigh": False,
     "maxPrice": None,
     "minPrice": None,
@@ -64,6 +68,11 @@ SEARCH_DEFAULTS: dict[str, Any] = {
 }
 
 ORDERING_VALUES = ("Price", "ModelRarity", "BackgroundRarity", "SymbolRarity")
+
+# MRKT refuses facet requests containing too many collections. Keep requests
+# comfortably below its current limit of 10; _facet_rows also splits a rejected
+# batch so a server-side limit change cannot break "select all" again.
+FACET_COLLECTION_BATCH_SIZE = 10
 
 # Candidate order-book paths, in descending order of plausibility. Probed, never
 # assumed: an invented endpoint that 404s silently would look like "no orders",
@@ -172,7 +181,42 @@ class MrktClient:
             )
         if r.status_code != 200:
             if not raise_for_status:
-                return {"__status__": r.status_code}
+                # The body is returned alongside the status, not discarded. MRKT
+                # publishes no API, so its validation message naming the missing
+                # or wrong field is the only specification there is -- throwing it
+                # away leaves a caller with a bare number and nothing to act on.
+                payload: dict[str, Any] = {"__status__": r.status_code}
+                if r.text:
+                    try:
+                        body = r.json()
+                    except Exception:
+                        payload["__text__"] = r.text[:400]
+                    else:
+                        if isinstance(body, dict):
+                            payload.update(body)
+                        else:
+                            payload["__body__"] = body
+                return payload
+            # A 400 means MRKT understood the request and refused its shape --
+            # a field renamed, a new one required, an enum that stopped accepting
+            # null. Since MRKT publishes no API, its own error text is the only
+            # specification available, so the field names we sent are included
+            # alongside it: seeing "we sent X, it wants Y" is the whole diagnosis.
+            #
+            # One reading trap, learned the hard way. A complaint about a field
+            # called "req" does NOT mean a field named req is missing: "req" is
+            # the parameter name in MRKT's own controller signature, so
+            # "The req field is required" means the whole body failed to bind.
+            # Look at the *other* errors in the same response for the real cause
+            # -- in our case an `ordering: null` that could not convert.
+            #
+            # Keys only, never values: a payload can carry prices and a cursor,
+            # and the surrounding log lines are not the place for them.
+            if r.status_code == 400 and isinstance(json, dict):
+                raise MrktError(
+                    f"MRKT {path}: HTTP 400 {r.text[:300]} "
+                    f"(sent fields: {sorted(json)})"
+                )
             raise MrktError(f"MRKT {path}: HTTP {r.status_code} {r.text[:200]}")
         if not r.text:
             return {}
@@ -242,7 +286,60 @@ class MrktClient:
     async def collections(self) -> list[Collection]:
         data = await self._request("GET", "/gifts/collections")
         rows = data if isinstance(data, list) else []
-        return [c for c in (Collection.parse(r) for r in rows) if c.name]
+        return [
+            c
+            for c in (Collection.parse(r) for r in rows)
+            if c.name
+            and not c.name.isdigit()
+            and not c.is_hidden
+            and c.raw.get("craftable", True)
+        ]
+
+    async def models(self, collections: list[str]) -> list[dict[str, Any]]:
+        """All models published for the selected collections.
+
+        This endpoint is case-sensitive: it expects ``Collections`` rather than
+        the ``collectionNames`` used by listing search. Sending the latter yields
+        a misleading "Collections is required" validation error.
+        """
+        return await self._facet_rows("/gifts/models", collections)
+
+    async def backdrops(self, collections: list[str]) -> list[dict[str, Any]]:
+        """All backdrops published for the selected collections."""
+        return await self._facet_rows("/gifts/backdrops", collections)
+
+    async def _facet_rows(
+        self, path: str, collections: list[str]
+    ) -> list[dict[str, Any]]:
+        names = list(dict.fromkeys(name for name in collections if name))
+        rows: list[dict[str, Any]] = []
+        for start in range(0, len(names), FACET_COLLECTION_BATCH_SIZE):
+            batch = names[start : start + FACET_COLLECTION_BATCH_SIZE]
+            rows.extend(await self._facet_batch(path, batch))
+        return rows
+
+    async def _facet_batch(
+        self, path: str, collections: list[str]
+    ) -> list[dict[str, Any]]:
+        if not collections:
+            return []
+        try:
+            data = await self._request(
+                "POST", path, json={"Collections": collections}
+            )
+        except MrktError as exc:
+            too_many = "Too many gifts collections" in str(exc)
+            if not too_many or len(collections) == 1:
+                raise
+            middle = len(collections) // 2
+            left = await self._facet_batch(path, collections[:middle])
+            right = await self._facet_batch(path, collections[middle:])
+            return left + right
+        return (
+            [row for row in data if isinstance(row, dict)]
+            if isinstance(data, list)
+            else []
+        )
 
     async def model_page(
         self,
@@ -320,62 +417,65 @@ class MrktClient:
                 return row
         return None
 
-    async def orders_for(
-        self, collection: str, model: str | None = None
-    ) -> Order | None:
-        """The highest standing order on a collection or model.
+    async def orders_page(
+        self,
+        *,
+        collections: list[str] | None = None,
+        models: list[str] | None = None,
+        backdrops: list[str] | None = None,
+        count: int | None = None,
+        cursor: str = "",
+    ) -> tuple[list[Order], str | None, int]:
+        """One page of the live order book. Returns (orders, next_cursor, total).
 
-        Only the top order matters for competing: to be first in the queue you
-        beat one number, you do not need the whole book.
+        ``POST /orders`` takes the same body shape as the search endpoint --
+        confirmed against the live server, which rejects a bare ``{}`` and accepts
+        the name-array form. Response is ``{orders, cursor, total}``.
 
-        Returns ``None`` when no order-book endpoint is reachable. The result
-        carries ``source``, and only ``source == "book"`` may drive a real bid --
-        anything else is display-only.
+        Note the quantity effect: a body with ``collectionNames`` set returned 20
+        orders where an unfiltered one returned 5, so filtering server-side is not
+        merely a convenience -- it is how the useful rows are reached at all.
         """
-        if not self.order_book_probed:
-            await self.probe_endpoints()
-        if self.order_book_path is None:
-            return None
+        body: dict[str, Any] = {
+            "collectionNames": list(collections or []),
+            "modelNames": list(models or []),
+            "backdropNames": list(backdrops or []),
+            "count": min(count or config.MRKT_PAGE_SIZE, config.MRKT_PAGE_SIZE),
+            "cursor": cursor or "",
+        }
+        data = await self._request("POST", "/orders", json=body)
+        if not isinstance(data, dict):
+            return [], None, 0
 
-        method, path = self.order_book_path
-        body: dict[str, Any] = {"collectionNames": [collection]}
-        if model:
-            body["modelNames"] = [model]
-        data = await self._request(
-            method, path,
-            json=body if method == "POST" else None,
-            raise_for_status=False,
-        )
-        if not isinstance(data, dict) or data.get("__status__"):
-            return None
-
-        rows = data.get("orders") or data.get("items") or data.get("offers") or []
+        rows = data.get("orders")
         if not isinstance(rows, list):
-            return None
+            return [], None, 0
 
-        parsed: list[Order] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            price = None
-            for key in ("price", "amount", "priceNanoTons", "maxPrice"):
-                price = Nano.parse(row.get(key))
-                if price is not None:
-                    break
-            if price is None:
-                continue
-            count = row.get("count")
-            parsed.append(
-                Order(
-                    collection=row.get("collectionName") or collection,
-                    model=row.get("modelName") or model,
-                    price=price,
-                    count=count if isinstance(count, int) else None,
-                    source="book",
-                    raw=row,
-                )
-            )
-        return top_order(parsed)
+        orders = [Order.parse(r) for r in rows if isinstance(r, dict)]
+        total = data.get("total")
+        return orders, data.get("cursor") or None, int(total or 0)
+
+    async def orders_for(
+        self,
+        collection: str,
+        model: str | None = None,
+        backdrop: str | None = None,
+    ) -> Order | None:
+        """The highest competing order on a collection, model or backdrop.
+
+        Only the top order matters: to be first in the queue you beat one number,
+        not the whole book.
+
+        Own orders are excluded -- outbidding yourself raises the price you pay
+        while competing with nobody, and since the tool re-reads the book after
+        each placement, including them would make it bid against itself.
+        """
+        orders, _, _ = await self.orders_page(
+            collections=[collection],
+            models=[model] if model else None,
+            backdrops=[backdrop] if backdrop else None,
+        )
+        return top_order(orders)
 
     async def probe_endpoints(self) -> dict[str, int]:
         """Ask the live server which order-book candidates exist.

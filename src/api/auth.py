@@ -68,12 +68,19 @@ def _data_check_string(fields: dict[str, str]) -> str:
     """Build the string Telegram signed.
 
     Every field except ``hash`` participates, sorted by key and joined with
-    newlines. ``signature`` is excluded too: it belongs to the newer Ed25519
-    third-party flow and is not part of the HMAC payload.
+    newlines.
+
+    ``signature`` is NOT excluded, and that distinction cost a debugging session.
+    It carries the Ed25519 third-party signature, which reads like something that
+    should be left out of an HMAC payload -- but Telegram computes ``hash`` over
+    the whole payload including it. Excluding it produced a valid-looking digest
+    that never matched, and only for clients new enough to send the field: older
+    ones worked, so it looked like a token problem rather than a payload one.
+
+    Cross-checked against aiogram's ``check_webapp_signature``, which pops
+    ``hash`` alone.
     """
-    return "\n".join(
-        f"{k}={fields[k]}" for k in sorted(fields) if k not in ("hash", "signature")
-    )
+    return "\n".join(f"{k}={fields[k]}" for k in sorted(fields) if k != "hash")
 
 
 def verify_init_data(
