@@ -15,6 +15,7 @@ the tracker's entire job -- so the ambiguity is designed out rather than handled
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -402,6 +404,24 @@ def engine():
         url = config.DATABASE_URL
         if not url:
             raise RuntimeError("DATABASE_URL is not set; see .env.example")
+        if url.startswith("sqlite"):
+            # Hosts commonly point DATABASE_URL at a path whose parent directory
+            # does not exist (or is not writable); both end as the same opaque
+            # "unable to open database file". Creating the directory here turns
+            # that into either a working database or a readable error.
+            path = make_url(url).database
+            if path and path != ":memory:":
+                parent = os.path.dirname(path)
+                if parent:
+                    try:
+                        os.makedirs(parent, exist_ok=True)
+                    except OSError:
+                        log.error(
+                            "cannot create database directory %s -- check that "
+                            "the volume mounted there is writable", parent
+                        )
+                        raise
+                log.info("sqlite database file %s", os.path.abspath(path))
         _engine = create_async_engine(
             url,
             # Verifies a pooled connection before handing it out. Without it a

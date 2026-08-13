@@ -36,11 +36,24 @@ fi
 # Forward SIGTERM to both children. Without this, `docker stop` waits out the full
 # grace period and then SIGKILLs, which can interrupt a write mid-transaction.
 terminate() {
-  # `kill 0` signals the whole process group, which is what the children join.
-  # Redirected because one of them may already be gone.
+  # Disable the trap first: `kill 0` signals the whole process group, including
+  # this very shell, and re-firing the handler from inside the handler would
+  # recurse until the shell gives up with "Maximum function recursion depth".
+  trap - TERM INT
   kill 0 2>/dev/null || true
 }
 trap terminate TERM INT
+
+# Probe the data volume as the runtime user before anything starts: a read-only
+# or root-owned mount makes SQLite fail with "unable to open database file",
+# which reads as an application bug instead of a mount problem.
+PROBE=/app/data/.write-probe-$$
+if ${AS_USER} sh -c "printf x > '${PROBE}'" 2>/dev/null; then
+  rm -f "${PROBE}"
+else
+  echo "[entrypoint] FATAL: /app/data is not writable by ${AS_USER:+ciabatta (uid 10001)}${AS_USER:-the container user} -- check the volume mount in the host panel" >&2
+  exit 3
+fi
 
 echo "[entrypoint] starting API on ${HOST}:${PORT}"
 # One worker deliberately: the tracker and the rate limiter hold per-process
