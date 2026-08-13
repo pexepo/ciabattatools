@@ -602,9 +602,6 @@ h3 { font-size: 15px; }
   color: var(--text);
   font: inherit;
   text-align: left;
-}
-
-button.facet-panel__head {
   cursor: pointer;
 }
 
@@ -643,6 +640,18 @@ button.facet-panel__head {
   min-height: 0;
   overflow: hidden;
 }
+
+/* An expanded panel scrolls inside itself instead of growing the whole form. */
+.facet-panel__scroll {
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Cards that the search input marks as hidden keep their explicit display
+ * (flex/grid), which would otherwise override the hidden attribute. */
+[hidden] { display: none !important; }
 
 .facet-search {
   display: flex;

@@ -560,34 +560,24 @@ function facetAvailability(draft) {
   };
 }
 
-/** Open state of one facet panel: available panels open by default and keep a
- * manual toggle; unavailable ones are forced closed by the rules below. */
-function facetPanelOpen(o, key, available) {
-  if (!available) return false;
+/** Open state of one facet panel: every panel opens by default and keeps a
+ * manual toggle; availability only decides what is inside the body. */
+function facetPanelOpen(o, key) {
   return o.sectionOpen[key] ?? true;
 }
 
-/** One collapsible facet panel: head (title, meta, chevron) + animated body. */
-function facetPanel({ title, key, available, open, meta, hint, body, toggleable = true }) {
-  const head = !toggleable
-    ? `<div class="facet-panel__head">
-         <span class="facet-panel__title">${title}</span>
-         <span class="facet-panel__meta">${meta}</span>
-       </div>`
-    : !available
-      ? `<div class="facet-panel__head">
-           <span class="facet-panel__title">${title}</span>
-           <span class="facet-panel__meta">${hint}</span>
-         </div>`
-      : `<button class="facet-panel__head" data-action="toggle-section" data-section="${key}"
-                 aria-expanded="${open ? 'true' : 'false'}">
-           <span class="facet-panel__title">${title}</span>
-           <span class="facet-panel__meta">${meta}</span>
-           <span class="facet-panel__chev" aria-hidden="true">▾</span>
-         </button>`;
+/** One collapsible facet panel: every head is a button with a chevron, so a
+ * tap always collapses or expands; an unavailable section shows its hint
+ * instead of a count in the meta. */
+function facetPanel({ title, key, open, meta, hint, body }) {
   return `<section class="card facet-panel">
-    ${head}
-    ${body ? `<div class="facet-panel__body${open ? ' is-open' : ''}"><div>${body}</div></div>` : ''}
+    <button class="facet-panel__head" data-action="toggle-section" data-section="${key}"
+            aria-expanded="${open ? 'true' : 'false'}">
+      <span class="facet-panel__title">${title}</span>
+      <span class="facet-panel__meta">${body ? meta : (hint ?? meta)}</span>
+      <span class="facet-panel__chev" aria-hidden="true">▾</span>
+    </button>
+    ${body ? `<div class="facet-panel__body${open ? ' is-open' : ''}"><div><div class="facet-panel__scroll">${body}</div></div></div>` : ''}
   </section>`;
 }
 
@@ -599,10 +589,10 @@ function toolFacetSection(o) {
   const backdropCount = Array.isArray(f.backdrop)
     ? f.backdrop.length
     : f.backdrop ? 1 : 0;
-  const modelsOpen = facetPanelOpen(o, 'model', modelsAvailable);
-  const backdropsOpen = facetPanelOpen(o, 'backdrop', backdropsAvailable);
+  const modelsOpen = facetPanelOpen(o, 'model');
+  const backdropsOpen = facetPanelOpen(o, 'backdrop');
 
-  // Collections: the only always-open panel; no chevron, no tap target.
+  // Collections: collapsible like the rest; the only body that is always there.
   const collectionMeta =
     collectionCount === 0 ? '—' : f.collectionAll ? 'все' : String(collectionCount);
 
@@ -638,16 +628,14 @@ function toolFacetSection(o) {
   return [
     facetPanel({
       title: 'Коллекции',
-      available: true,
-      open: true,
+      key: 'collection',
+      open: facetPanelOpen(o, 'collection'),
       meta: collectionMeta,
       body: collectionChips(f.collection, f.collectionQuery),
-      toggleable: false,
     }),
     facetPanel({
       title: 'Модели',
       key: 'model',
-      available: modelsAvailable,
       open: modelsOpen,
       meta: modelCount === 0 ? '—' : String(modelCount),
       hint: collectionCount === 0 ? 'сначала выбери коллекцию' : 'выбери одну коллекцию',
@@ -656,7 +644,6 @@ function toolFacetSection(o) {
     facetPanel({
       title: 'Фоны',
       key: 'backdrop',
-      available: backdropsAvailable,
       open: backdropsOpen,
       meta: backdropCount === 0 ? '—' : String(backdropCount),
       hint: 'выбери модель',
@@ -1401,10 +1388,7 @@ root.addEventListener('click', async (event) => {
 
   if (action === 'toggle-section' && state.overlay) {
     const key = target.dataset.section;
-    if (key !== 'model' && key !== 'backdrop') return;
-    const av = facetAvailability(state.overlay.draft);
-    const available = key === 'model' ? av.models : av.backdrops;
-    if (!available) return;
+    if (key !== 'collection' && key !== 'model' && key !== 'backdrop') return;
     state.overlay.sectionOpen[key] = !(state.overlay.sectionOpen[key] ?? true);
     haptic();
     render();
