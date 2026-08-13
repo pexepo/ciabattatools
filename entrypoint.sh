@@ -14,6 +14,25 @@ set -eu
 PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
 
+# Host-deployed volumes are usually owned by root, while the image runs as
+# uid 10001 (ciabatta) -- an unowned mount makes SQLite fail with "unable to
+# open database file" and the bot dies on the very first read. When this script
+# runs as root it fixes the ownership of the data directory and then drops
+# privileges for both children, so the runtime stays non-root either way.
+# setpriv is preferred over su because slim images ship no PAM.
+if [ "$(id -u)" = "0" ]; then
+  mkdir -p /app/data
+  chown ciabatta:ciabatta /app/data
+  if command -v setpriv >/dev/null 2>&1; then
+    AS_USER="setpriv --reuid=10001 --regid=10001 --init-groups"
+  else
+    echo "[entrypoint] setpriv not found, running as root" >&2
+    AS_USER=""
+  fi
+else
+  AS_USER=""
+fi
+
 # Forward SIGTERM to both children. Without this, `docker stop` waits out the full
 # grace period and then SIGKILLs, which can interrupt a write mid-transaction.
 terminate() {
@@ -27,7 +46,7 @@ echo "[entrypoint] starting API on ${HOST}:${PORT}"
 # One worker deliberately: the tracker and the rate limiter hold per-process
 # state, so a second worker would double the request budget spent against MRKT
 # while each half believed it was inside the limit.
-python -m uvicorn src.api.app:app \
+${AS_USER} python -m uvicorn src.api.app:app \
   --host "${HOST}" \
   --port "${PORT}" \
   --workers 1 \
@@ -36,7 +55,7 @@ python -m uvicorn src.api.app:app \
 api_pid=$!
 
 echo "[entrypoint] starting bot"
-python -m src.bot.main &
+${AS_USER} python -m src.bot.main &
 bot_pid=$!
 
 # `wait -n` returns as soon as the first child exits, but it is a bashism -- so

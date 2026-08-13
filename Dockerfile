@@ -42,11 +42,12 @@ RUN chmod +x entrypoint.sh
 RUN mkdir -p /app/data
 VOLUME ["/app/data"]
 
-# Non-root. The container writes only to /app/data, and a stolen MTProto session
-# is worth more than most container escapes.
+# Non-root runtime. The entrypoint starts as root only long enough to make the
+# data volume writable by this user, then drops privileges via setpriv before
+# launching the processes; see entrypoint.sh. A stolen MTProto session is worth
+# more than most container escapes.
 RUN useradd --create-home --uid 10001 ciabatta \
  && chown -R ciabatta:ciabatta /app
-USER ciabatta
 
 # BotHost injects its own PORT; this is the fallback for a plain docker run.
 ENV PORT=8080
