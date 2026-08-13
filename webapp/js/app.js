@@ -1394,6 +1394,23 @@ root.addEventListener('click', async (event) => {
     return;
   }
 
+  if (action === 'toggle-section' && state.overlay) {
+    const key = target.dataset.section;
+    const draft = state.overlay.draft;
+    const collectionCount = Array.isArray(draft.collection)
+      ? draft.collection.length
+      : draft.collection ? 1 : 0;
+    const modelCount = Array.isArray(draft.model) ? draft.model.length : draft.model ? 1 : 0;
+    const available = key === 'model'
+      ? collectionCount === 1
+      : collectionCount === 1 && modelCount > 0;
+    if (!available) return;
+    state.overlay.sectionOpen[key] = !(state.overlay.sectionOpen[key] ?? true);
+    haptic();
+    render();
+    return;
+  }
+
   if (action === 'select-all' && state.overlay) {
     syncDraft();
     const group = target.dataset.selectGroup;
@@ -1421,6 +1438,12 @@ root.addEventListener('click', async (event) => {
         }
       } else if (group === 'model' && state.overlay.draft.model.length === 0) {
         state.overlay.draft.backdrop = [];
+      }
+      if (group === 'collection') {
+        delete state.overlay.sectionOpen.model;
+        delete state.overlay.sectionOpen.backdrop;
+      } else if (group === 'model') {
+        delete state.overlay.sectionOpen.backdrop;
       }
       haptic();
       render();
@@ -1572,6 +1595,12 @@ root.addEventListener('click', async (event) => {
       } else if (chip === 'model' && !draft.model) {
         draft.backdrop = '';
       }
+    }
+    if (chip === 'collection') {
+      delete state.overlay.sectionOpen.model;
+      delete state.overlay.sectionOpen.backdrop;
+    } else if (chip === 'model') {
+      delete state.overlay.sectionOpen.backdrop;
     }
     haptic();
     render();
