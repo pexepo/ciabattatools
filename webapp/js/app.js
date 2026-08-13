@@ -550,6 +550,37 @@ function previewTile(o) {
  * sniping and ordering hold one value each, and isPicked() reads both. One mental
  * model across the app, and each option shows its own art, floor and rarity.
  */
+/** Open state of one facet panel: available panels open by default and keep a
+ * manual toggle; unavailable ones are forced closed by the rules below. */
+function facetPanelOpen(o, key, available) {
+  if (!available) return false;
+  return o.sectionOpen[key] ?? true;
+}
+
+/** One collapsible facet panel: head (title, meta, chevron) + animated body. */
+function facetPanel({ title, key, available, open, meta, hint, body, toggleable = true }) {
+  const head = !toggleable
+    ? `<div class="facet-panel__head">
+         <span class="facet-panel__title">${title}</span>
+         <span class="facet-panel__meta">${meta}</span>
+       </div>`
+    : !available
+      ? `<div class="facet-panel__head">
+           <span class="facet-panel__title">${title}</span>
+           <span class="facet-panel__meta dim">${hint}</span>
+         </div>`
+      : `<button class="facet-panel__head" data-action="toggle-section" data-section="${key}"
+                 aria-expanded="${open ? 'true' : 'false'}">
+           <span class="facet-panel__title">${title}</span>
+           <span class="facet-panel__meta">${meta}</span>
+           <span class="facet-panel__chev" aria-hidden="true">▾</span>
+         </button>`;
+  return `<section class="card facet-panel">
+    ${head}
+    <div class="facet-panel__body${open ? ' is-open' : ''}"><div>${body}</div></div>
+  </section>`;
+}
+
 function toolFacetSection(o) {
   const f = o.draft;
   const facets = o.facets;
@@ -558,19 +589,35 @@ function toolFacetSection(o) {
     ? f.collection.length
     : f.collection ? 1 : 0;
   const modelCount = Array.isArray(f.model) ? f.model.length : f.model ? 1 : 0;
-  const modelsOpen = collectionCount === 1;
-  const backdropsOpen = modelsOpen && modelCount > 0;
-  const modelBlock = !modelsOpen
-    ? `<div class="facet-hint">${collectionCount === 0 ? 'Сначала выбери одну коллекцию' : 'Модели доступны только для одной коллекции'}</div>`
+  const backdropCount = Array.isArray(f.backdrop)
+    ? f.backdrop.length
+    : f.backdrop ? 1 : 0;
+  const modelsAvailable = collectionCount === 1;
+  const backdropsAvailable = modelsAvailable && modelCount > 0;
+  const modelsOpen = facetPanelOpen(o, 'model', modelsAvailable);
+  const backdropsOpen = facetPanelOpen(o, 'backdrop', backdropsAvailable);
+
+  // Collections: the only always-open panel; no chevron, no tap target.
+  const collectionMeta =
+    collectionCount === 0 ? '—' : f.collectionAll ? 'все' : String(collectionCount);
+
+  // Models: scoped to exactly one collection; select-all lives in the body
+  // now (the head is a button and cannot nest a second button).
+  const modelSelectAll =
+    modelsAvailable && Array.isArray(f.model) && facets?.models?.length
+      ? `<button class="btn btn--ghost select-all" data-action="select-all" data-select-group="model">${facets.models.every((m) => f.model.includes(m.name)) ? 'Снять все' : 'Выбрать все'}</button>`
+      : '';
+  const modelBody = !modelsAvailable
+    ? ''
     : facets === null
       ? skeletons(3)
-      : `${facetSearch('model', f.modelQuery, 'Найти модель')}${facetCards('model', facets.models, f.model, f.modelQuery)}`;
+      : `${facetSearch('model', f.modelQuery, 'Найти модель')}${modelSelectAll}${facetCards('model', facets.models, f.model, f.modelQuery)}`;
 
-  const withBackdrop = true;
-  const reco = withBackdrop && facets ? monochromeBackdrops(facets.backdrops) : [];
+  // Backdrops: scoped to at least one model; monochrome filter stays in body.
+  const reco = facets ? monochromeBackdrops(facets.backdrops) : [];
   const shownBackdrops = f.monochromeOnly ? reco : facets?.backdrops ?? [];
-  const backdropBlock = !backdropsOpen
-    ? '<div class="facet-hint">Сначала выбери хотя бы одну модель</div>'
+  const backdropBody = !backdropsAvailable
+    ? ''
     : facets === null
       ? skeletons(3)
       : `<div class="facet-tools">
@@ -583,14 +630,34 @@ function toolFacetSection(o) {
          ${Array.isArray(f.backdrop) ? `<button class="btn btn--ghost select-all" data-action="select-all" data-select-group="backdrop">${shownBackdrops.length && shownBackdrops.every((b) => f.backdrop.includes(b.name)) ? 'Снять все' : 'Выбрать все'}</button>` : ''}
          ${facetCards('backdrop', shownBackdrops, f.backdrop, f.backdropQuery)}`;
 
-  const modelSelectAll = modelsOpen && Array.isArray(f.model) && facets?.models?.length
-    ? `<button class="btn btn--ghost select-all" data-action="select-all" data-select-group="model">${facets.models.every((m) => f.model.includes(m.name)) ? 'Снять все' : 'Выбрать все'}</button>`
-    : '';
-
-  return `
-    <section class="card stack facet-section"><h3>Коллекции</h3>${collectionChips(f.collection, f.collectionQuery)}</section>
-    <section class="card stack facet-section${modelsOpen ? '' : ' facet-section--locked'}"><div class="row row--between"><h3>Модели</h3>${modelSelectAll}</div>${modelBlock}</section>
-    ${withBackdrop ? `<section class="card stack facet-section${backdropsOpen ? '' : ' facet-section--locked'}"><h3>Фоны</h3>${backdropBlock}</section>` : ''}`;
+  return [
+    facetPanel({
+      title: 'Коллекции',
+      available: true,
+      open: true,
+      meta: collectionMeta,
+      body: collectionChips(f.collection, f.collectionQuery),
+      toggleable: false,
+    }),
+    facetPanel({
+      title: 'Модели',
+      key: 'model',
+      available: modelsAvailable,
+      open: modelsOpen,
+      meta: modelCount === 0 ? '—' : String(modelCount),
+      hint: collectionCount === 0 ? 'сначала выбери коллекцию' : 'выбери одну коллекцию',
+      body: modelBody,
+    }),
+    facetPanel({
+      title: 'Фоны',
+      key: 'backdrop',
+      available: backdropsAvailable,
+      open: backdropsOpen,
+      meta: backdropCount === 0 ? '—' : String(backdropCount),
+      hint: 'выбери модель',
+      body: backdropBody,
+    }),
+  ].join('');
 }
 
 function trackerSettings(f, kind) {
@@ -1229,6 +1296,7 @@ function openTool(kind, ciabatta = null) {
     kind,
     ciabattaId: ciabatta?.id ?? null,
     draft: defaults,
+    sectionOpen: {},
     facets: null,
     floor: null,
     floorBusy: false,
