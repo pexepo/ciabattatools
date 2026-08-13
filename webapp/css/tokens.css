@@ -602,6 +602,9 @@ h3 { font-size: 15px; }
   color: var(--text);
   font: inherit;
   text-align: left;
+}
+
+button.facet-panel__head {
   cursor: pointer;
 }
 
@@ -627,8 +630,7 @@ h3 { font-size: 15px; }
   transform: rotate(-90deg);
 }
 
-/* Collapsed by default, animated exactly like .toast__more: grid-template-rows
- * animates to auto; max-height cannot without hardcoding a wrong height. */
+/* Grid rows animate from 0fr to 1fr, the same .toast__more technique. */
 .facet-panel__body {
   display: grid;
   grid-template-rows: 0fr;

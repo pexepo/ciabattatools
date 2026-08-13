@@ -544,12 +544,22 @@ function previewTile(o) {
     </div>`;
 }
 
-/** Collection/model/backdrop pickers for a tool.
- *
- * Every tool now uses the same image cards: tracker holds an array (multi-select),
- * sniping and ordering hold one value each, and isPicked() reads both. One mental
- * model across the app, and each option shows its own art, floor and rarity.
- */
+/** Whether each facet section is currently usable, mirroring the
+ * single-source rules below: models need exactly one collection,
+ * backdrops need at least one model. */
+function facetAvailability(draft) {
+  const collectionCount = Array.isArray(draft.collection)
+    ? draft.collection.length
+    : draft.collection ? 1 : 0;
+  const modelCount = Array.isArray(draft.model) ? draft.model.length : draft.model ? 1 : 0;
+  return {
+    collectionCount,
+    modelCount,
+    models: collectionCount === 1,
+    backdrops: collectionCount === 1 && modelCount > 0,
+  };
+}
+
 /** Open state of one facet panel: available panels open by default and keep a
  * manual toggle; unavailable ones are forced closed by the rules below. */
 function facetPanelOpen(o, key, available) {
@@ -567,7 +577,7 @@ function facetPanel({ title, key, available, open, meta, hint, body, toggleable 
     : !available
       ? `<div class="facet-panel__head">
            <span class="facet-panel__title">${title}</span>
-           <span class="facet-panel__meta dim">${hint}</span>
+           <span class="facet-panel__meta">${hint}</span>
          </div>`
       : `<button class="facet-panel__head" data-action="toggle-section" data-section="${key}"
                  aria-expanded="${open ? 'true' : 'false'}">
@@ -577,7 +587,7 @@ function facetPanel({ title, key, available, open, meta, hint, body, toggleable 
          </button>`;
   return `<section class="card facet-panel">
     ${head}
-    <div class="facet-panel__body${open ? ' is-open' : ''}"><div>${body}</div></div>
+    ${body ? `<div class="facet-panel__body${open ? ' is-open' : ''}"><div>${body}</div></div>` : ''}
   </section>`;
 }
 
@@ -585,15 +595,10 @@ function toolFacetSection(o) {
   const f = o.draft;
   const facets = o.facets;
 
-  const collectionCount = Array.isArray(f.collection)
-    ? f.collection.length
-    : f.collection ? 1 : 0;
-  const modelCount = Array.isArray(f.model) ? f.model.length : f.model ? 1 : 0;
+  const { collectionCount, modelCount, models: modelsAvailable, backdrops: backdropsAvailable } = facetAvailability(f);
   const backdropCount = Array.isArray(f.backdrop)
     ? f.backdrop.length
     : f.backdrop ? 1 : 0;
-  const modelsAvailable = collectionCount === 1;
-  const backdropsAvailable = modelsAvailable && modelCount > 0;
   const modelsOpen = facetPanelOpen(o, 'model', modelsAvailable);
   const backdropsOpen = facetPanelOpen(o, 'backdrop', backdropsAvailable);
 
@@ -1396,14 +1401,9 @@ root.addEventListener('click', async (event) => {
 
   if (action === 'toggle-section' && state.overlay) {
     const key = target.dataset.section;
-    const draft = state.overlay.draft;
-    const collectionCount = Array.isArray(draft.collection)
-      ? draft.collection.length
-      : draft.collection ? 1 : 0;
-    const modelCount = Array.isArray(draft.model) ? draft.model.length : draft.model ? 1 : 0;
-    const available = key === 'model'
-      ? collectionCount === 1
-      : collectionCount === 1 && modelCount > 0;
+    if (key !== 'model' && key !== 'backdrop') return;
+    const av = facetAvailability(state.overlay.draft);
+    const available = key === 'model' ? av.models : av.backdrops;
     if (!available) return;
     state.overlay.sectionOpen[key] = !(state.overlay.sectionOpen[key] ?? true);
     haptic();
