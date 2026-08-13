@@ -583,22 +583,66 @@ h3 { font-size: 15px; }
   gap: var(--s2);
 }
 
-.facet-section {
-  max-height: min(310px, 42vh);
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
+/* Collapsible facet panels (collections / models / backdrops). */
+.facet-panel {
+  padding: var(--s3);
+  padding-bottom: var(--s2);
 }
 
-.facet-section--locked {
-  max-height: 130px;
-  opacity: 0.72;
+.facet-panel__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-height: 34px;
+  margin-bottom: var(--s2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.facet-panel__title {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.facet-panel__meta {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.facet-panel__chev {
+  color: var(--text-dim);
+  font-size: 12px;
+  transition: transform var(--t-fast) var(--ease);
+}
+
+.facet-panel__head[aria-expanded="false"] .facet-panel__chev {
+  transform: rotate(-90deg);
+}
+
+/* Collapsed by default, animated exactly like .toast__more: grid-template-rows
+ * animates to auto; max-height cannot without hardcoding a wrong height. */
+.facet-panel__body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--t-slow) var(--ease);
+}
+
+.facet-panel__body.is-open { grid-template-rows: 1fr; }
+
+.facet-panel__body > div {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .facet-search {
-  position: sticky;
-  top: calc(var(--s4) * -1);
-  z-index: 3;
   display: flex;
   align-items: center;
   gap: var(--s2);
