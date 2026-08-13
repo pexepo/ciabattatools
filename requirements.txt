@@ -1,0 +1,72 @@
+# Ciabatta Tools -- runtime dependencies
+#
+# Pinned with a compatible-release bound (~=) rather than left open. This
+# project drives a live account with spending authority, and a transitive
+# breaking change in a market client surfaces as a wrong trade, not as a
+# stack trace.
+
+# --- Telegram -----------------------------------------------------------------
+# Bot side: the chat dialogue, inline keyboards, mini-app button.
+aiogram~=3.15
+
+# User side (MTProto). Telethon rather than Pyrogram for two reasons:
+#   1. the unique-gift methods (payments.getUniqueStarGift and friends) need a
+#      recent layer, and Telethon tracks them;
+#   2. it also exposes RequestWebViewRequest, which is how the MRKT token is
+#      obtained -- so one MTProto library covers both jobs instead of two.
+telethon~=1.38
+
+# Telethon needs these for 2FA (SRP) and session encryption. Without them
+# submit_password() fails at the point a user can least diagnose it, so they are
+# declared here rather than left to an extra.
+pyaes~=1.6
+rsa~=4.9
+
+# --- MRKT transport -----------------------------------------------------------
+# Not httpx or aiohttp, and this is not a style preference. MRKT fingerprints
+# the TLS handshake (JA3/JA4) and drops clients that do not look like a browser;
+# the prior project records IMPERSONATE = "chrome124" as the profile known to
+# work. A plain-Python HTTP stack is rejected before the application ever sees
+# the request.
+curl_cffi~=0.7
+
+# --- Mini-app backend ---------------------------------------------------------
+fastapi~=0.115
+uvicorn[standard]~=0.32
+# initData and request bodies are parsed into models, so a malformed payload is
+# refused at the edge instead of deep inside a trading path.
+pydantic~=2.10
+
+# --- Storage ------------------------------------------------------------------
+# SQLite is the default (see config.DATABASE_URL) and Postgres is opt-in via that
+# same variable. SQLite wins for BotHost: one file on one mounted volume, nothing
+# else to provision. Its single-writer lock is a real limit, so a deployment
+# running many active Ciabattas should point DATABASE_URL at Postgres instead.
+#
+# aiosqlite is therefore a runtime dependency, not a test one: without it the
+# default DSN cannot open a connection and the bot fails at startup.
+aiosqlite~=0.20
+sqlalchemy[asyncio]~=2.0
+asyncpg~=0.30
+alembic~=1.14
+
+# Redis holds the floor-price cache and the cross-process rate-limit token, so
+# two workers cannot each spend the same MRKT request budget.
+redis~=5.2
+
+# --- Crypto -------------------------------------------------------------------
+# AES-GCM for session strings and API keys at rest. src/core/crypto.py imports
+# it lazily and fails with a readable message when it is absent.
+cryptography~=44.0
+
+# --- Development --------------------------------------------------------------
+# Not needed at runtime; the Dockerfile installs with --no-deps against a
+# separate list, so shipping pytest to production is not a concern here.
+# The existing suite is stdlib unittest and runs without pytest
+# (python3 -m unittest discover -s tests -t .), but pytest gives clearer failure
+# output and is what the async tests below will need.
+pytest~=8.3
+# The bot, the API and the tracker are all async, so their tests are coroutines;
+# plain pytest silently skips those with a warning rather than failing.
+pytest-asyncio~=0.24
+

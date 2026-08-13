@@ -1,0 +1,39 @@
+# Secrets. The repository is public, so this is the entry that matters most:
+# .env holds the bot token, the API hash and the encryption key, and one
+# accidental commit means rotating all three.
+.env
+.env.*
+!.env.example
+
+# Runtime data -- the SQLite database, encrypted session blobs, logs. Committing
+# these would publish users' Telegram sessions.
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.session
+*.session-journal
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node. Only appears if tooling is added later; the mini-app itself has no build
+# step and ships as plain ES modules.
+node_modules/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Agent and tooling scratch, not part of the project.
+.claude/
+.superpowers/

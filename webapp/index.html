@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <!-- viewport-fit=cover lets the app paint under the notch; the safe-area
+         insets in tokens.css then keep content clear of it. Without cover, iOS
+         letterboxes the page and the background stops at the bezel. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+    <meta name="color-scheme" content="dark light" />
+    <title>Ciabatta Tools</title>
+
+    <!-- Telegram's bridge is a blocking script on purpose: app.js reads
+         window.Telegram.WebApp while the module evaluates, and a deferred load
+         would leave initData empty on first paint -- a spurious 401. -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <link rel="stylesheet" href="/css/tokens.css" />
+
+    <!-- Inline because it must apply before the first frame. Telegram sets its
+         theme variables on the document, and a flash of the dark fallback on a
+         light theme is the most visible seam a mini-app has. -->
+    <style>
+      #splash {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: var(--bg);
+        z-index: 100;
+        transition: opacity var(--t-slow) var(--ease);
+      }
+      #splash[hidden] { display: none; }
+      #splash.is-done {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .splash-mark {
+        width: 64px;
+        height: 64px;
+        color: var(--crust);
+        animation: splash-breathe 1.6s var(--ease) infinite;
+      }
+      @keyframes splash-breathe {
+        0%, 100% { opacity: 0.45; transform: scale(0.97); }
+        50%      { opacity: 1;    transform: scale(1); }
+      }
+      /* Decorative only, so under reduced-motion it simply sits still. */
+      @media (prefers-reduced-motion: reduce) {
+        .splash-mark { animation: none; opacity: 1; }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- The project mark, inlined so the first frame costs no extra request.
+         Coordinates come from the supplied logo: the C, the T, and the crumb. -->
+    <div id="splash" aria-hidden="true">
+      <svg
+        class="splash-mark"
+        viewBox="0 0 500 500"
+        xmlns="http://www.w3.org/2000/svg"
+        fill="currentColor"
+      >
+        <g transform="scale(1,-1) translate(0,-500)">
+          <path
+            d="M 180.8 35.4 Q 160.3 9.2 122.6 2.8 Q 75.9 -5.0 44.1 20.5 Q 12.4 46.1 3.6 98.5 Q -5.9 155.2 19.3 190.9 Q 41.3 222.1 82.1 228.9 Q 136.7 238.1 168.0 206.5 Q 185.3 188.7 189.7 168.6 L 144.5 161.1 Q 137.5 175.9 129.2 182.7 Q 114.6 194.7 90.3 190.6 Q 65.7 186.5 54.8 164.2 Q 43.9 141.9 50.0 105.5 Q 56.1 69.1 74.2 53.5 Q 92.2 37.9 115.4 41.8 Q 139.2 45.8 149.1 63.4 Q 154.6 73.0 156.3 90.5 L 201.1 98.0 Q 201.2 61.6 180.8 35.4 Z"
+            transform="translate(87.7,172.9)"
+          />
+          <path
+            d="M 176.3 235.9 L 182.7 197.6 L 118.0 186.7 L 147.8 8.6 L 102.3 1.0 L 72.5 179.1 L 7.4 168.2 L 1.0 206.5 Z"
+            transform="translate(236.6,94.8)"
+          />
+          <path
+            d="M 14.6 1.1 L 43.1 5.9 C 47.5 6.6 50.4 10.7 49.7 15.1 L 45.4 40.8 C 44.6 45.1 40.5 48.1 36.2 47.4 L 7.7 42.6 C 3.3 41.8 0.4 37.7 1.1 33.4 L 5.4 7.7 C 6.1 3.3 10.3 0.4 14.6 1.1 Z"
+            transform="translate(179.3,250.2)"
+          />
+          <path
+            d="M 64.9 166.8 C 64.9 110.0 10.2 62.2 1.0 1.0 L 47.8 8.7 C 67.9 61.4 103.2 107.7 107.9 166.8 C 109.0 181.6 64.9 181.7 64.9 166.8 Z"
+            transform="translate(179.2,83.9)"
+          />
+          <path
+            d="M 1.0 39.5 L 102.3 55.8 L 108.5 17.3 L 7.2 1.0 L 1.0 39.5 Z"
+            transform="translate(245.9,153.1)"
+          />
+        </g>
+      </svg>
+    </div>
+
+    <div id="root"></div>
+
+    <noscript>
+      <div style="padding: 24px; text-align: center">
+        <h1>Ciabatta Tools</h1>
+        <p>Нужен включённый JavaScript.</p>
+      </div>
+    </noscript>
+
+    <script type="module" src="/js/app.js"></script>
+
+    <script>
+      // Two nested rAFs: one alone fires before the module has committed its
+      // first render, and the splash would uncover an empty page.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const splash = document.getElementById('splash');
+          if (!splash) return;
+          splash.classList.add('is-done');
+          splash.addEventListener('transitionend', () => (splash.hidden = true), {
+            once: true,
+          });
+        })
+      );
+
+      // Last line of defence, not error handling: a module that fails to parse
+      // leaves #root empty, and a blank screen tells the user nothing. Real
+      // failures are reported inside the app.
+      window.addEventListener('error', (event) => {
+        const root = document.getElementById('root');
+        if (root && !root.children.length) {
+          const detail = String(event.message || '').replace(/[<>&]/g, '');
+          root.innerHTML =
+            '<div style="padding:24px;text-align:center">' +
+            '<h1>Не удалось загрузить</h1>' +
+            '<p style="opacity:.7">Закрой и открой приложение заново.</p>' +
+            '<p style="opacity:.5;font-size:12px">' + detail + '</p></div>';
+          document.getElementById('splash')?.setAttribute('hidden', '');
+        }
+      });
+    </script>
+  </body>
+</html>

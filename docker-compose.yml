@@ -1,0 +1,62 @@
+# VPS deployment. BotHost users do not need this file -- the panel builds the
+# Dockerfile directly; see DEPLOY.txt section 2.
+#
+#     cp .env.example .env && docker compose up -d --build
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+
+    # Reads the whole .env rather than listing variables here: duplicating them
+    # means a new setting works locally and is silently absent in production.
+    env_file: .env
+
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+
+    volumes:
+      # Sessions and the SQLite database. Without this bind mount every redeploy
+      # logs all users out -- the most common first-deploy mistake there is.
+      - ./data:/app/data
+
+    # The image declares its own HEALTHCHECK against /healthz; this only tells
+    # Compose how to react to it.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${PORT:-8080}/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    # Bounded logs. A tracker polling every few seconds fills a disk over weeks,
+    # and an out-of-space host fails in ways that look like application bugs.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional. Uncomment together with DATABASE_URL in .env when SQLite's
+  # single-writer lock starts serialising many active Ciabattas.
+  #
+  # db:
+  #   image: postgres:16-alpine
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: ciabatta
+  #     POSTGRES_PASSWORD: change-me
+  #     POSTGRES_DB: ciabatta
+  #   volumes:
+  #     - ./data/pg:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ciabatta"]
+  #     interval: 10s
+  #     retries: 5
+  #
+  # Then set in .env:
+  #   DATABASE_URL=postgresql+asyncpg://ciabatta:change-me@db:5432/ciabatta
+  # and add to the app service:
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy

@@ -1,0 +1,432 @@
+/* Ciabatta Tools -- design tokens and primitives.
+ *
+ * Between premium and minimal: one accent colour, generous space, and motion
+ * that is felt rather than watched.
+ *
+ * Two constraints shape everything here.
+ *
+ * Telegram owns the palette. The client injects --tg-theme-* variables that
+ * follow the user's own theme, so a hardcoded background makes the app look
+ * foreign in half of Telegram's themes. Every colour below falls back to a dark
+ * default only when Telegram supplies nothing.
+ *
+ * No build step. The browser loads this directly -- no autoprefixer, no nesting,
+ * no preprocessor. Plain custom properties and plain selectors.
+ */
+
+:root {
+  /* --- Telegram-driven surface ------------------------------------------- */
+  --bg: var(--tg-theme-bg-color, #0f0f12);
+  --bg-secondary: var(--tg-theme-secondary-bg-color, #17171c);
+  --text: var(--tg-theme-text-color, #f2f2f4);
+  --text-dim: var(--tg-theme-hint-color, #8a8a95);
+  --link: var(--tg-theme-link-color, #d9a04a);
+
+  /* --- Brand ------------------------------------------------------------- */
+  /* Baked ciabatta crust. Warm, so it reads premium rather than corporate, and
+   * far enough from Telegram's blue that our own actions are recognisable. */
+  --crust: #d9a04a;
+  --crust-deep: #b87f2e;
+  --crumb: #f5e6c8;
+
+  /* Semantic. Never carried by hue alone -- gain and loss also get an arrow,
+   * because colour-blind users must not depend on the colour. */
+  --up: #4ec98b;
+  --down: #e5675f;
+  --warn: #e8b04b;
+
+  /* Rarity, ordered. The same four bands as markets.mrkt.models.rarity_band,
+   * so a colour here always means what the API said. */
+  --uncommon: #8a8a95;
+  --rare: #5aa9e6;
+  --epic: #b57ce0;
+  --legendary: #e8b04b;
+
+  /* --- Space ------------------------------------------------------------- */
+  /* 4px base; every gap is a multiple. That is what keeps a dense catalogue
+   * from looking accidental. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-full: 999px;
+
+  /* --- Motion ------------------------------------------------------------ */
+  /* Two durations only. More than that and timings drift apart as the app
+   * grows, which is what makes an interface feel unowned. */
+  --t-fast: 140ms;
+  --t-slow: 260ms;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    system-ui, sans-serif;
+  /* Tabular figures for prices: proportional digits make a column of numbers
+   * jitter as values update. */
+  --font-num: ui-monospace, "SF Mono", "Roboto Mono", monospace;
+}
+
+/* Telegram exposes no reduced-motion signal of its own, so this follows the OS.
+ * Animations are neutralised rather than shortened: a 1ms animation still fires
+ * layout and still triggers discomfort for motion-sensitive users. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.45;
+  height: 100%;
+  /* Telegram's webview bounces on overscroll and reveals the page behind it,
+   * which makes the app look detached from the client. */
+  overscroll-behavior: none;
+}
+
+body {
+  /* Safe-area insets for the notch and home indicator. Telegram does not inset
+   * the webview, so without this the header sits under the clock. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* --- typography ---------------------------------------------------------- */
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  /* Default tracking looks loose above ~20px and is the clearest tell of an
+   * untouched default style. */
+  letter-spacing: -0.02em;
+  font-weight: 650;
+}
+
+h1 { font-size: 22px; }
+h2 { font-size: 17px; }
+h3 { font-size: 15px; }
+
+.dim { color: var(--text-dim); }
+
+.num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- buttons ------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  /* 44px floor: below that, thumbs miss. Telegram's own controls sit at 44, so
+   * anything smaller reads as a different app. */
+  min-height: 44px;
+  padding: 0 var(--s4);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font: inherit;
+  font-weight: 550;
+  cursor: pointer;
+  transition: transform var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+  /* Removes the 300ms double-tap-to-zoom delay, which otherwise makes every
+   * tap feel late. */
+  touch-action: manipulation;
+}
+
+/* :active, not :hover -- there is no hover on a phone, and a hover style on
+ * touch sticks after the finger lifts. */
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn--primary {
+  background: linear-gradient(135deg, var(--crust), var(--crust-deep));
+  color: #1a1206;
+}
+
+.btn--ghost {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.btn--danger {
+  background: color-mix(in srgb, var(--down) 18%, transparent);
+  color: var(--down);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* :focus-visible rather than :focus, so a tap does not leave a ring behind. */
+.btn:focus-visible,
+.input:focus-visible {
+  outline: 2px solid var(--crust);
+  outline-offset: 2px;
+}
+
+/* --- inputs -------------------------------------------------------------- */
+
+.input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--s3);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font: inherit;
+  /* Exactly 16px: iOS Safari zooms the page when a focused input is smaller,
+   * and that zoom does not undo itself. */
+  font-size: 16px;
+}
+
+.input--num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* Price stepper: -5% | value | +5%, for the sniping screen. */
+.stepper {
+  display: grid;
+  grid-template-columns: 56px 1fr 56px;
+  gap: var(--s2);
+  align-items: center;
+}
+
+/* --- cards --------------------------------------------------------------- */
+
+.card {
+  background: var(--bg-secondary);
+  border-radius: var(--r-lg);
+  padding: var(--s4);
+}
+
+.card--tap {
+  cursor: pointer;
+  transition: transform var(--t-fast) var(--ease);
+}
+
+.card--tap:active {
+  transform: scale(0.985);
+}
+
+/* --- gift thumbnail ------------------------------------------------------ */
+
+.thumb {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  /* The per-gift backdrop gradient is set inline from the two colours the API
+   * returns; it is data, so it cannot live in a stylesheet. */
+  background: var(--bg);
+  display: grid;
+  place-items: center;
+}
+
+.thumb img {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+  /* Sticker thumbnails arrive at unpredictable sizes; without a fixed box the
+   * grid reflows as each one lands. */
+  display: block;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: 2px var(--s2);
+  border-radius: var(--r-full);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.badge--uncommon  { background: color-mix(in srgb, var(--uncommon) 20%, transparent);  color: var(--uncommon); }
+.badge--rare      { background: color-mix(in srgb, var(--rare) 20%, transparent);      color: var(--rare); }
+.badge--epic      { background: color-mix(in srgb, var(--epic) 20%, transparent);      color: var(--epic); }
+.badge--legendary { background: color-mix(in srgb, var(--legendary) 20%, transparent); color: var(--legendary); }
+
+/* --- layout -------------------------------------------------------------- */
+
+.app {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: var(--s4);
+  /* Clears the fixed tab bar; without it the last card is unreachable. */
+  padding-bottom: 88px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--s3);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.row--between { justify-content: space-between; }
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+/* --- tab bar ------------------------------------------------------------- */
+
+.tabs {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-auto-flow: column;
+  /* Padding rather than margin: the home indicator overlaps a margin. */
+  padding: var(--s2) var(--s3) calc(var(--s2) + env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  z-index: 10;
+}
+
+.tab {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  padding: var(--s2) 0;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color var(--t-fast) var(--ease);
+}
+
+.tab[aria-current="page"] { color: var(--crust); }
+
+/* --- toast (the collapsible notification callout) ------------------------ */
+
+.toast {
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--crust) 22%, transparent);
+  padding: var(--s3);
+  cursor: pointer;
+  animation: slide-in var(--t-slow) var(--ease);
+}
+
+/* Collapsed by default with the detail behind a tap, per the requirement that a
+ * notification shows brief info and can be expanded. */
+.toast__more {
+  /* grid-template-rows animates to auto; max-height cannot without hardcoding
+   * a height that will eventually be wrong. */
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--t-slow) var(--ease);
+}
+
+.toast[data-open="true"] .toast__more { grid-template-rows: 1fr; }
+
+.toast__more > div { overflow: hidden; }
+
+/* --- states -------------------------------------------------------------- */
+
+/* Skeletons rather than a spinner: a spinner says "wait", a skeleton says what
+ * is arriving -- and the catalogue's shape is known before its data. */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-secondary) 0%,
+    color-mix(in srgb, var(--text) 6%, var(--bg-secondary)) 50%,
+    var(--bg-secondary) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: var(--r-md);
+}
+
+.empty {
+  text-align: center;
+  padding: var(--s7) var(--s4);
+  color: var(--text-dim);
+}
+
+/* --- keyframes ----------------------------------------------------------- */
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.fade-in { animation: fade-in var(--t-slow) var(--ease); }
+
+/* --- dry-run banner ------------------------------------------------------ */
+
+/* Visible whenever simulation is on. Someone who forgets they are in dry-run
+ * concludes the tools are broken; someone who forgets they are live loses
+ * money. The second is worse, so the banner states the safe state loudly. */
+.dry-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 550;
+}
