@@ -50,6 +50,7 @@ trap terminate TERM INT
 PROBE=/app/data/.write-probe-$$
 if ${AS_USER} sh -c "printf x > '${PROBE}'" 2>/dev/null; then
   rm -f "${PROBE}"
+  echo "[entrypoint] data volume /app/data OK"
 else
   echo "[entrypoint] FATAL: /app/data is not writable by ${AS_USER:+ciabatta (uid 10001)}${AS_USER:-the container user} -- check the volume mount in the host panel" >&2
   exit 3
